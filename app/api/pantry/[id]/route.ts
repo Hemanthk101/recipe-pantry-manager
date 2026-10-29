@@ -1,0 +1,7 @@
+import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import { requireUser,jsonError,validId,isSameOrigin } from '@/lib/http';
+import { pantrySchema } from '@/lib/validation';
+type Ctx={params:Promise<{id:string}>};
+export async function PATCH(request:Request,{params}:Ctx){if(!(await isSameOrigin(request)))return jsonError('Invalid request origin.',403);const id=validId((await params).id);if(!id)return jsonError('Invalid pantry id.');const a=await requireUser();if(!a.user)return a.response;const p=pantrySchema.safeParse(await request.json().catch(()=>null));if(!p.success)return jsonError(p.error.issues[0]?.message??'Invalid pantry item.');const r=await query('UPDATE pantry SET ingredient_id=$1,quantity=$2,expiry_date=$3,updated_at=CURRENT_TIMESTAMP WHERE pantry_id=$4 AND user_id=$5 RETURNING pantry_id',[p.data.ingredientId,p.data.quantity,p.data.expiryDate||null,id,a.user.userId]);if(!r.rowCount)return jsonError('Pantry item not found.',404);return NextResponse.json({ok:true})}
+export async function DELETE(request:Request,{params}:Ctx){if(!(await isSameOrigin(request)))return jsonError('Invalid request origin.',403);const id=validId((await params).id);if(!id)return jsonError('Invalid pantry id.');const a=await requireUser();if(!a.user)return a.response;const r=await query('DELETE FROM pantry WHERE pantry_id=$1 AND user_id=$2 RETURNING pantry_id',[id,a.user.userId]);if(!r.rowCount)return jsonError('Pantry item not found.',404);return NextResponse.json({ok:true})}

@@ -1,0 +1,2 @@
+import {NextResponse} from 'next/server';import{query}from'@/lib/db';import{requireUser}from'@/lib/http';
+export async function GET(){const a=await requireUser();if(!a.user)return a.response;const r=await query(`SELECT r.recipe_id id,r.title,r.description,r.cuisine,r.prep_time "prepTime",r.difficulty,u.name author FROM favorites f JOIN recipes r USING(recipe_id) JOIN users u ON u.user_id=r.created_by WHERE f.user_id=$1 ORDER BY f.created_at DESC`,[a.user.userId]);return NextResponse.json({recipes:r.rows})}
