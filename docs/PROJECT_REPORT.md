@@ -1,7 +1,7 @@
 # Savor: Recipe & Pantry Manager
 
 **DBMS Level 3 Project — SQL and web application components**
-Prepared to match the supplied project guide, with the NoSQL/vector portion excluded as requested.
+Prepared to match the supplied project guide, including both the SQL (PostgreSQL) and NoSQL (MongoDB) components.
 
 ## 1. Problem statement
 
@@ -259,6 +259,73 @@ Passwords use bcrypt. Session data is signed in an HTTP-only cookie. Registratio
 
 Start PostgreSQL and the app as described in the README. Sign in as the demo student. Search recipes, filter by pantry match, add pantry stock, show expiry dates, favorite a recipe, submit a rating, and cook a recipe while showing quantities decrease. Create a recipe. Sign in as admin and show ingredient creation. Finish with the schema and explain the ERD, keys, constraints, indexes, view, trigger, stored function, and transaction.
 
+
+
+## 14. NoSQL component — MongoDB cooking logs
+
+### Justification
+
+Relational tables are ideal for pantry quantities, recipe–ingredient requirements, and referential integrity. Cooking *sessions*, however, carry highly variable attributes: free-form notes, optional substitutions, cook-specific ratings, time taken, tags, and lists of ingredients actually used. These fit a document model better than a rigid relational schema. MongoDB is therefore used for an append-only `cooking_logs` collection while PostgreSQL remains the system of record for structured inventory and recipes.
+
+### Data model
+
+```
+cooking_logs {
+  _id: ObjectId
+  userId: Number          // logical FK → users.user_id
+  recipeId: Number        // logical FK → recipes.recipe_id
+  recipeTitle: String     // denormalized for display
+  cuisine: String
+  cookedAt: Date
+  notes?: String
+  substitutions?: [{ original: String, used: String }]
+  ratingOfCook?: Number   // 1–5
+  timeTakenMinutes?: Number
+  servings?: Number
+  success: Boolean
+  ingredientsUsed?: [{ name, quantity, unit }]
+  tags?: [String]
+  metadata?: Object
+}
+```
+
+### Indexes
+
+- `{ userId: 1, cookedAt: -1 }` — primary user history query
+- `{ recipeId: 1 }`
+- `{ cuisine: 1 }`
+- Text index on `notes`, `recipeTitle`, `tags`
+- `{ cookedAt: -1 }`
+
+### Integration points
+
+1. **POST /api/recipes/:id/cook** — after a successful SQL transaction that deducts pantry stock, a cooking_log document is inserted into MongoDB (notes and optional fields may be supplied in the request body).
+2. **GET /api/cooking-logs** — returns the current user’s documents (filterable by cuisine or text search).
+3. **GET /api/cooking-logs/stats** — four aggregation pipelines:
+   - most-cooked recipes (`$group` + `$sort` + `$limit`)
+   - cuisine breakdown
+   - overall averages (rating, time)
+   - count of cooks in the last 30 days
+4. **History** tab in the Next.js UI surfaces the logs and aggregation results.
+
+### Advanced NoSQL features demonstrated
+
+- Document-oriented storage with optional nested arrays/objects
+- Secondary and text indexes
+- Aggregation framework (`$match`, `$group`, `$avg`, `$sum`, `$project`, `$sort`, `$cond`)
+- Dual-write pattern coordinated with a relational transaction
+
+### Setup
+
+```bash
+docker compose up -d          # starts postgres + mongo
+npm run mongo:setup           # creates indexes
+npm run mongo:seed            # sample logs for the demo student
+```
+
+Environment variables: `MONGODB_URI`, `MONGODB_DB` (see `.env.example`). Credentials are never hard-coded.
+
+
 ## 13. Limitations and future work
 
-The NoSQL/vector portion is intentionally omitted per scope. Future work includes unit conversion, richer allergen filters, automated PostgreSQL integration tests, recipe photos, backups, and deployment observability.
+Future work includes unit conversion, richer allergen filters, automated integration tests, recipe photos, vector similarity search for recipes, backups, and deployment observability.

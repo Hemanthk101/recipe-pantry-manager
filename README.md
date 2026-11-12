@@ -1,101 +1,126 @@
 # Savor — Recipe & Pantry Manager
 
-A SQL-backed mini project for discovering recipes, tracking pantry stock and expiry dates, saving favorites, and leaving ratings. This implements the SQL and web-interface components of the supplied DBMS guide. The guide's NoSQL/vector database component is intentionally excluded per project scope.
+A dual-database mini project for discovering recipes, tracking pantry stock and expiry dates, saving favorites, leaving ratings, and logging flexible cooking sessions. Implements the SQL **and** NoSQL components of the DBMS Level 3 guide.
 
 ## Stack and scope
 
-- Next.js App Router, React, TypeScript, responsive CSS
-- PostgreSQL with parameterized SQL through `pg`
-- Seven relational tables, constraints, indexes, a reporting view, trigger, stored function, and full-text search
-- Registration/sign-in, student/admin roles, recipes, ingredients, pantry, favorites, reviews, recipe filtering, and transactional stock consumption
-- No MongoDB, document database, or vector database component is included.
+- **Frontend:** Next.js App Router, React, TypeScript, responsive CSS
+- **SQL Database (mandatory):** PostgreSQL — accounts, ingredients, recipes, pantry lots, favorites, reviews, constraints, indexes, view, trigger, stored function, full-text search, transactional stock deduction
+- **NoSQL Database:** MongoDB — flexible `cooking_logs` documents (notes, substitutions, cook ratings, time taken, tags, ingredients used). Demonstrates document model, indexes, and aggregation pipelines
+- Registration/sign-in, student/admin roles, recipe filtering, and “I made it” which both updates SQL pantry stock and writes a MongoDB cooking session
+- Environment variables for all database credentials (nothing hard-coded)
+
+## Why SQL + NoSQL?
+
+| Data | Store | Justification |
+|------|--------|----------------|
+| Users, recipes, ingredient catalogue, pantry quantities, favorites, reviews | PostgreSQL | Strong relational integrity, foreign keys, transactions for atomic stock deduction, joins for “makeable” recipes |
+| Cooking session history (variable notes, substitutions, optional ratings, tags) | MongoDB | Schema-flexible documents; fields differ per cook; natural fit for append-only activity logs and aggregation analytics |
 
 ## Run locally
 
-Requirements: Node.js 20.9+ and Docker Desktop (or a local PostgreSQL 15+ server).
+Requirements: Node.js 20.9+, Docker Desktop (or local PostgreSQL 15+ and MongoDB 6+).
 
 1. Install packages:
 
-   ```powershell
+   ```bash
    npm install
    ```
 
-2. Start PostgreSQL using Docker Compose:
+2. Start PostgreSQL **and** MongoDB:
 
-   ```powershell
-   docker compose up -d db
+   ```bash
+   docker compose up -d
    ```
 
-   Or create a PostgreSQL database named `recipe_pantry` and adjust `DATABASE_URL`.
+3. Copy `.env.example` to `.env.local`. Set a random `APP_SECRET` (≥ 32 characters).
 
-3. Copy `.env.example` to `.env.local`. Set a random `APP_SECRET` with at least 32 characters. The example database URL is for the local Compose service only.
-
-   ```powershell
-   Copy-Item .env.example .env.local
+   ```bash
+   cp .env.example .env.local
    ```
 
-4. Create the tables and seed demo records:
+4. Create SQL tables + seed, then Mongo indexes + sample logs:
 
-   ```powershell
+   ```bash
    npm run db:setup
    npm run db:seed
+   npm run mongo:setup
+   npm run mongo:seed
    ```
 
-5. Run the app at http://localhost:3000:
+5. Run the app:
 
-   ```powershell
+   ```bash
    npm run dev
    ```
 
-Demo accounts (local demonstration only):
+   Open http://localhost:3000
+
+Demo accounts (local only):
 
 - Student: `student.demo@example.test` / `Student123!`
 - Admin: `admin.demo@example.test` / `Admin123!`
 
-The seed utility stores bcrypt hashes. Do not use these demo credentials in deployment.
+## Demo walkthrough (NoSQL focus)
 
-## Demo walkthrough
+1. Sign in as student. Browse Discover, filter by pantry, cook a recipe (“I made it”). Optionally enter a note when prompted — it is stored as a MongoDB document.
+2. Open the **History** tab. View cooking session logs, top recipes (aggregation), cuisine breakdown, and summary stats — all from MongoDB.
+3. Show indexes and aggregation examples in code / Mongo shell if needed.
+4. For SQL portion: ER diagram, schema, view, trigger, stored function, transactional cook, as before.
 
-1. Sign in as the student and show Discover, recipe cards, ratings, search, and the “In my pantry” filter.
-2. Open My pantry, show quantities and expiry dates, add an ingredient, and remove an item.
-3. Return to Discover. Show pantry matches; select “I made it” to deduct ingredients. The operation is transactional and uses earliest-expiring lots first. Try an unavailable recipe to show the insufficient-stock response.
-4. Favorite a recipe and switch to Favorites. Leave a rating and comment.
-5. Create a recipe with multiple ingredient quantities to demonstrate the recipe_ingredients junction table.
-6. Sign in as admin. The admin role can add catalog ingredients through `POST /api/ingredients`; a student cannot.
-7. For the SQL portion, show `db/schema.sql`, run query examples from the report, and explain the ER-to-relational mapping and constraints.
-
-## API routes
+## API routes (additions)
 
 | Route | Methods | Purpose |
-|---|---|---|
-| `/api/auth/register`, `/login`, `/logout`, `/me` | POST / GET | Account lifecycle and current session |
-| `/api/recipes` | GET, POST | Search/filter recipes and create a recipe |
-| `/api/recipes/:id` | GET, PUT, DELETE | Read/manage a recipe; owner/admin checks |
-| `/api/recipes/:id/reviews` | POST | Create or update the current user's review |
-| `/api/recipes/:id/cook` | POST | Deduct stock atomically across unexpired lots |
-| `/api/pantry`, `/api/pantry/:id` | GET, POST, PATCH, DELETE | User-owned inventory and expiry data |
-| `/api/favorites`, `/api/favorites/:recipeId` | GET, POST | Saved recipes and favorite toggle |
-| `/api/ingredients` | GET, POST | Admin-only catalog creation |
+|-------|---------|---------|
+| `/api/cooking-logs` | GET, POST | List / create flexible cooking session documents (MongoDB) |
+| `/api/cooking-logs/stats` | GET | Aggregation pipelines: top recipes, cuisine counts, averages |
+| `/api/recipes/:id/cook` | POST | SQL stock deduction **+** MongoDB cooking log (optional body: notes, ratingOfCook, etc.) |
+
+## NoSQL data model (`cooking_logs`)
+
+```js
+{
+  userId: Number,           // links to SQL users.user_id
+  recipeId: Number,         // links to SQL recipes.recipe_id
+  recipeTitle: String,      // denormalized
+  cuisine: String,
+  cookedAt: Date,
+  notes: String?,
+  substitutions: [{ original, used }]?,
+  ratingOfCook: Number?,    // 1–5
+  timeTakenMinutes: Number?,
+  servings: Number?,
+  success: Boolean,
+  ingredientsUsed: [{ name, quantity, unit }]?,
+  tags: [String]?,
+  metadata: Object?
+}
+```
+
+**Indexes:** `{ userId: 1, cookedAt: -1 }`, `{ recipeId: 1 }`, `{ cuisine: 1 }`, text index on `notes` + `recipeTitle` + `tags`.
+
+**Advanced NoSQL features demonstrated:** document model, secondary indexes, text search index, multiple aggregation pipelines (`$group`, `$sort`, `$project`, `$avg`, `$sum`, `$match`).
 
 ## Data integrity and security
 
-- Passwords are hashed with bcrypt; passwords and session tokens are never returned by APIs.
-- Sessions use a signed, seven-day, HTTP-only, SameSite cookie. `APP_SECRET` must be at least 32 characters.
-- Writes use server-side validation and parameterized SQL. Role and resource ownership checks run on the server.
-- Foreign keys and check constraints enforce references, ratings, quantities, and roles.
-- Recipe cooking runs in a database transaction and rolls back if stock is insufficient.
-- Same-origin checks guard state-changing requests. Production cookies use the Secure flag.
-- Keep `.env.local` private. Configure TLS for PostgreSQL and HTTPS when deployed.
+- Passwords hashed with bcrypt; credentials only via environment variables.
+- Sessions: signed HTTP-only cookies.
+- Parameterized SQL; role and ownership checks on the server.
+- MongoDB writes are best-effort after successful SQL commit (cook still succeeds if Mongo is temporarily unavailable).
+
+## Files of interest
+
+- `db/schema.sql` — PostgreSQL DDL + advanced SQL features
+- `lib/mongo.ts` — MongoDB client, collection, indexes
+- `app/api/cooking-logs/` — NoSQL API
+- `app/api/recipes/[id]/cook/route.ts` — dual-write on cook
+- `scripts/setup-mongo.mjs`, `scripts/seed-mongo.mjs`
+- `docs/PROJECT_REPORT.md` — full documentation including NoSQL section
 
 ## Checks
 
-`npm test` runs schema/seed integrity checks. `npm run lint` and `npm run build` check the frontend. Database integration checks require a running PostgreSQL service.
-
-## Files
-
-- `db/schema.sql` — relational DDL, indexes, view, trigger, stored function, and SQL examples
-- `db/seed.sql` — repeatable demonstration data
-- `docs/PROJECT_REPORT.md` — project specification, ERD, schema, data dictionary, architecture, queries, test plan, and demo notes
-- `tests/validation.test.mjs` — schema integrity checks
-
-The demo seed contains three recipes and nine ingredient catalogue entries. Run `npm run db:seed` again to add or refresh the demo records without deleting unrelated user data.
+```bash
+npm test
+npm run lint
+npm run build
+```
